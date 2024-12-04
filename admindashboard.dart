@@ -13,23 +13,27 @@ class AdminDashboard extends StatefulWidget {
 
 class AdminDashboardState extends State<AdminDashboard> with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  TextEditingController luggageSearchController = TextEditingController();
+  final TextEditingController luggageSearchController = TextEditingController();
+  String searchQuery = ""; // To store the user's search input
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+
+    // Update searchQuery whenever the user types in the search bar
+    luggageSearchController.addListener(() {
+      setState(() {
+        searchQuery = luggageSearchController.text.trim();
+      });
+    });
   }
 
-  // Method to search by luggage ID for both accepted luggage and notifications
-  Future<QuerySnapshot> _searchByLuggageId(String collection, String query) {
-    if (query.isEmpty) {
-      return FirebaseFirestore.instance.collection(collection).get();
-    }
-    return FirebaseFirestore.instance
-        .collection(collection)
-        .where('luggageId', isEqualTo: query)
-        .get();
+  @override
+  void dispose() {
+    _tabController.dispose();
+    luggageSearchController.dispose();
+    super.dispose();
   }
 
   // Format the timestamp into a readable format
@@ -41,17 +45,27 @@ class AdminDashboardState extends State<AdminDashboard> with SingleTickerProvide
   Future<void> _logout() async {
     try {
       await FirebaseAuth.instance.signOut();
-      // Navigate to the login page after logging out
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (context) => LoginPage()),
       );
     } catch (e) {
-      // Show an error if sign-out fails
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Error logging out: $e")),
       );
     }
+  }
+
+  // Stream for filtering data based on the search query
+  Stream<QuerySnapshot> _getFilteredData(String collection) {
+    if (searchQuery.isEmpty) {
+      return FirebaseFirestore.instance.collection(collection).snapshots();
+    }
+    return FirebaseFirestore.instance
+        .collection(collection)
+        .where('luggageId', isGreaterThanOrEqualTo: searchQuery)
+        .where('luggageId', isLessThanOrEqualTo: '$searchQuery\uf8ff') // For partial matching
+        .snapshots();
   }
 
   @override
@@ -61,7 +75,6 @@ class AdminDashboardState extends State<AdminDashboard> with SingleTickerProvide
         title: const Text("Admin Dashboard"),
         backgroundColor: Colors.deepPurple,
         actions: [
-          // Logout button
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.red),
             onPressed: _logout,
@@ -90,14 +103,11 @@ class AdminDashboardState extends State<AdminDashboard> with SingleTickerProvide
                     border: OutlineInputBorder(),
                     prefixIcon: Icon(Icons.search),
                   ),
-                  onChanged: (value) {
-                    setState(() {}); // Refresh search results when typing
-                  },
                 ),
               ),
               Expanded(
-                child: FutureBuilder<QuerySnapshot>(
-                  future: _searchByLuggageId('accepted_requests', luggageSearchController.text),
+                child: StreamBuilder<QuerySnapshot>(
+                  stream: _getFilteredData('accepted_requests'),
                   builder: (context, snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting) {
                       return const Center(child: CircularProgressIndicator());
